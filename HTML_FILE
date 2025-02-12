@@ -1,0 +1,246 @@
+(function() {
+            function extractDetails() {
+                const generateXPath = (element) => {
+                    if (!element) return '';
+                    if (element === document.body) {
+                        return '/html/body';
+                    }
+                    let index = 0;
+                    let sibling = element.previousElementSibling;
+                    while (sibling) {
+                        if (sibling.nodeName === element.nodeName) {
+                            index++;
+                        }
+                        sibling = sibling.previousElementSibling;
+                    }
+                    const tagName = element.nodeName.toLowerCase();
+                    const nth = index ? `[${index + 1}]` : '';
+                    return `${generateXPath(element.parentNode)}/${tagName}${nth}`;
+                };
+
+                const isValidXPath = (xpath) => {
+                    try {
+                        document.evaluate(xpath, document, null, XPathResult.ANY_TYPE, null);
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                };
+
+                const cleanTextContent = (text) => {
+                    return text.replace(/\\s+/g, ' ').trim();
+                };
+
+                const allElements = document.querySelectorAll('*');
+                const elementMap = new Map();
+
+                allElements.forEach((element) => {
+                    const tagName = element.tagName.toLowerCase();
+
+                    if (['div', 'script', 'style'].includes(tagName)) {
+                        return;
+                    }
+
+                    let label = cleanTextContent(element.innerText || element.textContent || '');
+                    const elementXPath = generateXPath(element);
+                    const rect = element.getBoundingClientRect();
+
+                    if (['html', 'body'].includes(tagName) && label.length > 100) {
+                        return;
+                    }
+
+                    if (tagName === 'label') {
+                        const associatedElement = element.querySelector('input, select, textarea');
+                        if (associatedElement) {
+                            const associatedXPath = generateXPath(associatedElement);
+                            if (isValidXPath(associatedXPath)) {
+                                elementMap.set(associatedXPath, {
+                                    tagName: associatedElement.tagName.toLowerCase(),
+                                    xpath: associatedXPath,
+                                    element: cleanTextContent(element.innerText.trim()),
+                                    coordinates: {
+                                        x: rect.x,
+                                        y: rect.y,
+                                        width: rect.width,
+                                        height: rect.height,
+                                        center_x: rect.x + rect.width / 2,
+                                        center_y: rect.y + rect.height / 2
+                                    }
+                                });
+                            }
+                        }
+                    } else if (tagName === 'select') {
+                        const parentLabel = element.closest('label') ? cleanTextContent(element.closest('label').innerText.split('\\n')[0].trim()) : cleanTextContent(label.split('\\n')[0].trim());
+                        if (isValidXPath(elementXPath)) {
+                            elementMap.set(elementXPath, {
+                                tagName: tagName,
+                                xpath: elementXPath,
+                                element: parentLabel,
+                                coordinates: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height,
+                                    center_x: rect.x + rect.width / 2,
+                                    center_y: rect.y + rect.height / 2
+                                }
+                            });
+                        }
+                        Array.from(element.options).forEach((option, index) => {
+                            const optionRect = option.getBoundingClientRect();
+                            const optionXPath = `${elementXPath}/option[${index + 1}]`;
+                            if (isValidXPath(optionXPath)) {
+                                elementMap.set(`${elementXPath}${optionXPath}`, {
+                                    tagName: 'option',
+                                    element: `${parentLabel}: ${cleanTextContent(option.text)}`,
+                                    xpath: optionXPath,
+                                    coordinates: {
+                                        x: optionRect.x,
+                                        y: optionRect.y,
+                                        width: optionRect.width,
+                                        height: optionRect.height,
+                                        center_x: optionRect.x + optionRect.width / 2,
+                                        center_y: optionRect.y + optionRect.height / 2
+                                    }
+                                });
+                            }
+                        });
+                    } else if (tagName === 'input' && element.type === 'radio') {
+                        const radioWrapper = element.closest('label');
+                        const associatedLabel = radioWrapper ? radioWrapper.textContent : '';
+                        label = cleanTextContent(associatedLabel);
+                        if (isValidXPath(elementXPath)) {
+                            elementMap.set(elementXPath, {
+                                tagName: tagName,
+                                xpath: elementXPath,
+                                element: label,
+                                coordinates: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height,
+                                    center_x: rect.x + rect.width / 2,
+                                    center_y: rect.y + rect.height / 2
+                                }
+                            });
+                        }
+                    } else {
+                    if (!label) {
+                        label = element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.getAttribute('name') || element.getAttribute('title') || '';
+                    } else {
+                        // Concatenate text content of parent element if it contains a <b> tag
+                        const parentElement = element.closest('div');
+                        if (parentElement && parentElement.querySelector('b')) {
+                            label = cleanTextContent(parentElement.textContent);
+                        }
+                    }
+                        if (isValidXPath(elementXPath) && (!elementMap.has(elementXPath) || (elementMap.has(elementXPath) && label))) {
+                            elementMap.set(elementXPath, {
+                                tagName: tagName,
+                                xpath: elementXPath,
+                                element: label,
+                                coordinates: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height,
+                                    center_x: rect.x + rect.width / 2,
+                                    center_y: rect.y + rect.height / 2
+                                }
+                            });
+                        }
+                    }
+
+                    // Ensure all buttons are added to the elementMap
+                    if (tagName === 'button') {
+                        elementMap.set(elementXPath, {
+                            tagName: tagName,
+                            xpath: elementXPath,
+                            element: label,
+                            coordinates: {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height,
+                                center_x: rect.x + rect.width / 2,
+                                center_y: rect.y + rect.height / 2
+                            }
+                        });
+                    }
+                    
+                    // Handle special characters
+                    if (['span', 'a'].includes(tagName) && element.style.fontFamily) {
+                        const parentElement = element.closest('a');
+                        const title = parentElement ? parentElement.getAttribute('title') : '';
+                        const ariaLabel = parentElement ? parentElement.getAttribute('aria-label') : '';
+                        label = `${title || ariaLabel}`.trim();
+                        if (isValidXPath(elementXPath)) {
+                            elementMap.set(elementXPath, {
+                                tagName: tagName,
+                                xpath: elementXPath,
+                                element: label,
+                                coordinates: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height,
+                                    center_x: rect.x + rect.width / 2,
+                                    center_y: rect.y + rect.height / 2
+                                }
+                            });
+                        }
+                    }
+                });
+
+                // Assign nearest label's main text to input elements if their text is empty
+                elementMap.forEach((value, key) => {
+                    if (value.tagName === 'input' && !value.element) {
+                        const labelElement = document.evaluate(`${key}/preceding::label[1]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                        if (labelElement) {
+                            const labelText = labelElement.querySelector('span[id$="-label"]') ? cleanTextContent(labelElement.querySelector('span[id$="-label"]').innerText.trim()) : cleanTextContent(labelElement.innerText.trim());
+                            if (labelText) {
+                                value.element = labelText;
+                            }
+                        }
+                    }
+                });
+
+                const filteredElements = Array.from(elementMap.values()).reduce((acc, element) => {
+            const existingElement = acc.find(e => e.element === element.element && e.xpath.startsWith(element.xpath.slice(0, Math.floor(element.xpath.length * 0.9))));
+            if (existingElement) {
+                if (element.xpath.length > existingElement.xpath.length) {
+                    acc = acc.filter(e => e !== existingElement);
+                    acc.push(element);
+                }
+            } else {
+                acc.push(element);
+            }
+            return acc;
+        }, []);
+
+        const uniqueElements = filteredElements.map((element) => {
+            const elements = document.evaluate(element.xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            if (elements.snapshotLength > 1) {
+                for (let i = 0; i < elements.snapshotLength; i++) {
+                    const el = elements.snapshotItem(i);
+                    if (el.innerText.trim() === element.element) {
+                        element.xpath = `${element.xpath}[${i + 1}]`;
+                        break;
+                    }
+                }
+            }
+            return element;
+        });
+
+        const finalElements = uniqueElements.filter((element, index, self) => {
+            if (element.tagName === 'button' || element.tagName === 'a') {
+                return true;
+            }
+            return !self.some((e) => e.xpath.startsWith(element.xpath) && e.xpath !== element.xpath);
+        });
+
+        console.log('Final Elements:', finalElements);
+        return finalElements;
+    }
+    return extractDetails();
+})();
